@@ -226,7 +226,7 @@ fn validate_and_build(
         return None;
     }
     let files = if media_type == "series" {
-        build_series_files(&parsed, season, episode)
+        build_series_files(&parsed, season, episode, None)
     } else {
         vec![]
     };

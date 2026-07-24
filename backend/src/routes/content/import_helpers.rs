@@ -869,6 +869,7 @@ pub async fn insert_torrent_import_files(
             size: Some(size),
             season_number: 0,
             episode_number: 0,
+            episode_end: None,
         };
         let file_id =
             crate::db::upsert_stream_file_row(pool, crate::db::StreamId(stream_id), &file_row)

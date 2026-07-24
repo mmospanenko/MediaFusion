@@ -378,7 +378,7 @@ async fn scrape_tamil_forum(
                     };
 
                     let files = if is_series {
-                        build_series_files(&parsed, None, None)
+                        build_series_files(&parsed, None, None, None)
                     } else {
                         vec![]
                     };
@@ -401,6 +401,7 @@ async fn scrape_tamil_forum(
                         &[stream],
                         &meta,
                         media_type_str,
+                        None,
                         None,
                         None,
                     )

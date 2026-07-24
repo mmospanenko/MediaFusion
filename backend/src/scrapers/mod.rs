@@ -99,6 +99,7 @@ pub struct StreamFile {
     pub filename: String,
     pub season_number: i32,
     pub episode_number: i32,
+    pub episode_end: Option<i32>,
 }
 
 /// A Telegram document stream scraped at request time.

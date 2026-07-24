@@ -271,6 +271,7 @@ fn build_series_files(entry: &HashlistEntry, parsed: &parser::ParsedTitle) -> Ve
                 filename: entry.filename.clone(),
                 season_number: parsed.seasons[0],
                 episode_number: episode,
+                episode_end: None,
             });
         }
     } else {
@@ -280,6 +281,7 @@ fn build_series_files(entry: &HashlistEntry, parsed: &parser::ParsedTitle) -> Ve
                 filename: entry.filename.clone(),
                 season_number: season,
                 episode_number: 1,
+                episode_end: None,
             });
         }
     }
@@ -390,6 +392,7 @@ async fn store_torrent_stream(
         &resolved.media_type,
         resolved.season,
         resolved.episode,
+        None,
     )
     .await;
 

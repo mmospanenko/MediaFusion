@@ -933,6 +933,28 @@ async fn ensure_rating_provider(pool: &PgPool, name: &str, max_rating: f64) -> O
     .flatten()
 }
 
+/// Fetch the episode count for a given season from the `season` table.
+/// Returns `None` when no metadata exists for that season.
+pub async fn fetch_season_episode_count(
+    pool: &PgPool,
+    media_id: MediaId,
+    season_number: i32,
+) -> Option<i32> {
+    sqlx::query_scalar(
+        r#"
+        SELECT episode_count FROM season
+        WHERE series_id = (SELECT id FROM series_metadata WHERE media_id = $1)
+          AND season_number = $2
+        "#,
+    )
+    .bind(media_id.0)
+    .bind(season_number)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+}
+
 async fn upsert_ratings(pool: &PgPool, media_id: i32, ratings: &[NormalizedRating]) {
     for rating in ratings {
         if rating.rating <= 0.0 {

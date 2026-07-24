@@ -35,6 +35,7 @@ pub fn racing_files_from_html(html_files: &[HtmlTorrentFile]) -> Vec<StreamFile>
                 filename: title,
                 season_number: 1,
                 episode_number: episode,
+                episode_end: None,
             })
         })
         .collect();
@@ -69,6 +70,7 @@ pub fn racing_files_from_torrent_bytes(bytes: &[u8]) -> Vec<StreamFile> {
                         filename: title,
                         season_number: 1,
                         episode_number: episode,
+                        episode_end: None,
                     })
                 })
                 .collect::<Vec<_>>()
@@ -95,6 +97,7 @@ pub fn unresolved_racing_placeholder(display_title: &str) -> Vec<StreamFile> {
         filename: display_title.to_string(),
         season_number: 1,
         episode_number: 1,
+        episode_end: None,
     }]
 }
 
@@ -172,6 +175,7 @@ pub async fn resolve_racing_files(
                 filename: base.to_string(),
                 season_number: 1,
                 episode_number: episode,
+                episode_end: None,
             })
         })
         .collect();

@@ -564,6 +564,7 @@ async fn upsert_rss_stream(
             size: Some(size),
             season_number: s,
             episode_number: e,
+            episode_end: None,
         });
     }
 

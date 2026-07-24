@@ -192,7 +192,7 @@ impl JobHandler for ArabTorrentsCrawl {
 
                 let parsed = parser::parse_title(&item.title);
                 let files = if is_series {
-                    build_series_files(&parsed, None, None)
+                    build_series_files(&parsed, None, None, None)
                 } else {
                     vec![]
                 };
@@ -232,6 +232,7 @@ impl JobHandler for ArabTorrentsCrawl {
                         std::slice::from_ref(&stream),
                         &meta,
                         media_type,
+                        None,
                         None,
                         None,
                     )

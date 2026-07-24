@@ -40,6 +40,7 @@ pub async fn classify_sports_rss_release(
             filename: episode_title,
             season_number: season,
             episode_number: episode,
+            episode_end: None,
         }];
         return (series_title, None, "series", files, parsed);
     }
@@ -51,6 +52,7 @@ pub async fn classify_sports_rss_release(
             filename: episode_title,
             season_number: fighting.season_number,
             episode_number: fighting.episode_number,
+            episode_end: None,
         }];
         return (fighting.series_title, None, "series", files, parsed);
     }
@@ -201,7 +203,7 @@ pub async fn persist_sports_rss_stream(
         title: clean_title,
         year,
     };
-    stream_convert::write_back_torrents(pool, &[stream], &meta, effective_media_type, None, None)
+    stream_convert::write_back_torrents(pool, &[stream], &meta, effective_media_type, None, None, None)
         .await;
 
     if let Some(extra_files) = extra_files_to_persist {

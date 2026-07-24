@@ -217,6 +217,7 @@ fn process_item(
                     filename: String::new(),
                     season_number: parsed.seasons[0],
                     episode_number: *ep,
+                    episode_end: None,
                 });
             }
         } else {
@@ -226,6 +227,7 @@ fn process_item(
                     filename: String::new(),
                     season_number: *s,
                     episode_number: 1,
+                    episode_end: None,
                 });
             }
         }

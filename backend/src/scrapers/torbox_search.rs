@@ -268,7 +268,7 @@ fn parse_torrents_json(
             .map(|s| s as i32);
 
         let files = if media_type == "series" {
-            build_series_files(&parsed, season, episode)
+            build_series_files(&parsed, season, episode, None)
         } else {
             vec![]
         };
@@ -509,7 +509,7 @@ fn parse_usenet_json(
         }
 
         let files = if media_type == "series" {
-            build_series_files(&parsed, season, episode)
+            build_series_files(&parsed, season, episode, None)
         } else {
             vec![]
         };

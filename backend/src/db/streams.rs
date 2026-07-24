@@ -80,7 +80,7 @@ pub async fn fetch_streams_bulk(
             JOIN torrent_stream ts ON ts.stream_id = st.id
             WHERE fml.media_id = ANY($1)
               AND fml.season_number = $2
-              AND fml.episode_number = $3
+              AND (fml.episode_number = $3 OR (fml.episode_end IS NOT NULL AND fml.episode_number <= $3 AND fml.episode_end >= $3))
             GROUP BY fml.media_id
             "#,
         )
@@ -203,7 +203,7 @@ pub async fn fetch_usenet_streams_bulk(
             JOIN usenet_stream us ON us.stream_id = st.id
             WHERE fml.media_id = ANY($1)
               AND fml.season_number = $2
-              AND fml.episode_number = $3
+              AND (fml.episode_number = $3 OR (fml.episode_end IS NOT NULL AND fml.episode_number <= $3 AND fml.episode_end >= $3))
               AND st.is_active = true
               AND st.is_blocked = false
               AND st.is_keyword_blocked = false
@@ -301,7 +301,7 @@ pub async fn fetch_http_streams_bulk(
             JOIN stream_file sf ON sf.id = fml.file_id
             JOIN stream st ON st.id = sf.stream_id
             JOIN http_stream hs ON hs.stream_id = st.id
-            WHERE fml.media_id = ANY($1) AND fml.season_number = $2 AND fml.episode_number = $3
+            WHERE fml.media_id = ANY($1) AND fml.season_number = $2 AND (fml.episode_number = $3 OR (fml.episode_end IS NOT NULL AND fml.episode_number <= $3 AND fml.episode_end >= $3))
               AND st.is_active AND NOT st.is_blocked AND NOT st.is_keyword_blocked
         "#,
         )
@@ -425,7 +425,7 @@ pub async fn fetch_telegram_streams_bulk(
             JOIN stream_file sf ON sf.id = fml.file_id
             JOIN stream st ON st.id = sf.stream_id
             JOIN telegram_stream ts ON ts.stream_id = st.id
-            WHERE fml.media_id = ANY($1) AND fml.season_number = $2 AND fml.episode_number = $3
+            WHERE fml.media_id = ANY($1) AND fml.season_number = $2 AND (fml.episode_number = $3 OR (fml.episode_end IS NOT NULL AND fml.episode_number <= $3 AND fml.episode_end >= $3))
               AND st.is_active AND NOT st.is_blocked AND NOT st.is_keyword_blocked
         "#,
         )
@@ -653,7 +653,7 @@ pub async fn fetch_stream_playback_info(
                     JOIN file_media_link fml ON fml.file_id = sf_inner.id
                     WHERE sf_inner.stream_id = st.id
                       AND fml.season_number = $2
-                      AND fml.episode_number = $3
+                      AND (fml.episode_number = $3 OR (fml.episode_end IS NOT NULL AND fml.episode_number <= $3 AND fml.episode_end >= $3))
                     LIMIT 1
                 ) sf ON true
                 WHERE ts.info_hash = $1

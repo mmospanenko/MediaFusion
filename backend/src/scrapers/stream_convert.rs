@@ -15,6 +15,7 @@ impl From<&ScrapedStream> for TorrentStoreInput {
                 size: None,
                 season_number: f.season_number,
                 episode_number: f.episode_number,
+                episode_end: f.episode_end,
             })
             .collect();
 
@@ -46,6 +47,7 @@ impl From<&ScrapedUsenetStream> for UsenetStoreInput {
                 size: None,
                 season_number: f.season_number,
                 episode_number: f.episode_number,
+                episode_end: f.episode_end,
             })
             .collect();
 
@@ -88,9 +90,10 @@ pub fn scraper_store_opts(
     media_type: &str,
     season: Option<i32>,
     episode: Option<i32>,
+    episode_count: Option<i32>,
 ) -> crate::db::StoreStreamOpts {
     let mt = MediaType::from_wire(media_type).unwrap_or(MediaType::Movie);
-    crate::db::StoreStreamOpts::scraper(media_id, mt).with_episode(season, episode, None)
+    crate::db::StoreStreamOpts::scraper(media_id, mt).with_episode(season, episode, episode_count)
 }
 
 /// Scraper/job cold-path torrent persistence (replaces `persist::write_back`).
@@ -101,6 +104,7 @@ pub async fn write_back_torrents(
     media_type: &str,
     season: Option<i32>,
     episode: Option<i32>,
+    episode_count: Option<i32>,
 ) {
     if streams.is_empty() {
         return;
@@ -108,7 +112,7 @@ pub async fn write_back_torrents(
     if meta.media_id.0 <= 0 {
         return;
     }
-    let opts = scraper_store_opts(meta.media_id, media_type, season, episode);
+    let opts = scraper_store_opts(meta.media_id, media_type, season, episode, episode_count);
     let normalized: Vec<TorrentStoreInput> = streams.iter().map(TorrentStoreInput::from).collect();
     crate::db::store_torrent_streams(pool, &normalized, &opts).await;
 }
@@ -125,7 +129,7 @@ pub async fn write_back_usenet(
     if streams.is_empty() {
         return;
     }
-    let opts = scraper_store_opts(meta.media_id, media_type, season, episode);
+    let opts = scraper_store_opts(meta.media_id, media_type, season, episode, None);
     let normalized: Vec<UsenetStoreInput> = streams.iter().map(UsenetStoreInput::from).collect();
     crate::db::store_usenet_streams(pool, &normalized, &opts).await;
 }
@@ -142,7 +146,7 @@ pub async fn write_back_telegram(
     if streams.is_empty() {
         return false;
     }
-    let opts = scraper_store_opts(meta.media_id, media_type, season, episode);
+    let opts = scraper_store_opts(meta.media_id, media_type, season, episode, None);
     let mut inserted = false;
     for stream in streams {
         let input = TelegramStoreInput::from(stream);

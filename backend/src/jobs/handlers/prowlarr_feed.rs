@@ -193,6 +193,7 @@ impl JobHandler for ProwlarrFeedScraper {
                         media_type,
                         None,
                         None,
+                        None,
                     )
                     .await;
                 } else {

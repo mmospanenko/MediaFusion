@@ -10,7 +10,7 @@ use crate::{
         ScrapedStream, SearchMeta, StreamFile, torrent_info,
         torrent_metadata::{
             self, download_torrent_bytes, parse_torrent_bytes, prowlarr_torrent_type,
-            resolve_download_url, should_persist_torrent_file, torrent_file_for_storage,
+            resolve_download_url, torrent_file_for_storage,
         },
     },
 };
@@ -181,6 +181,7 @@ pub async fn scrape_indexer(
     media_type: &str,
     season: Option<i32>,
     episode: Option<i32>,
+    episode_count: Option<i32>,
     max_process: usize,
     query_timeout: Duration,
     title_queries: &[String],
@@ -207,6 +208,7 @@ pub async fn scrape_indexer(
         media_type,
         season,
         episode,
+        episode_count,
         max_process,
         query_timeout,
         title_queries,
@@ -263,6 +265,7 @@ pub async fn scrape(
             media_type,
             season,
             episode,
+            None,
             max_process,
             query_timeout,
             title_queries,
@@ -286,6 +289,7 @@ async fn scrape_indexer_inner(
     media_type: &str,
     season: Option<i32>,
     episode: Option<i32>,
+    episode_count: Option<i32>,
     max_process: usize,
     query_timeout: Duration,
     title_queries: &[String],
@@ -390,6 +394,7 @@ async fn scrape_indexer_inner(
                             media_type,
                             season,
                             episode,
+                            episode_count,
                             query_timeout,
                         )
                     })
@@ -541,6 +546,7 @@ async fn process_result(
     media_type: &str,
     season: Option<i32>,
     episode: Option<i32>,
+    episode_count: Option<i32>,
     query_timeout: Duration,
 ) -> Option<ScrapedStream> {
     let title = item.title.as_deref().unwrap_or("").trim().to_string();
@@ -583,19 +589,30 @@ async fn process_result(
     let mut announce_list: Vec<String> = Vec::new();
     let mut torrent_file: Option<Vec<u8>> = None;
     let mut size = item.size;
+    let parsed = parser::parse_title(&title);
+    let mut parsed_torrent_files: Option<Vec<crate::scrapers::torrent_metadata::TorrentFile>> = None;
 
-    let needs_download = should_persist_torrent_file(torrent_type) || info_hash.is_none();
+    let needs_download = torrent_metadata::needs_torrent_download(
+        torrent_type,
+        media_type,
+        &parsed,
+        season,
+        info_hash.as_deref(),
+    );
 
     if needs_download && let Some(url) = download_pick.as_deref() {
         if url.starts_with("magnet:") {
             info_hash = info_hash.or_else(|| parser::extract_info_hash(url));
             announce_list = torrent_metadata::announce_list_from_magnet(url);
         } else if let Some(bytes) = download_torrent_bytes(client, url, query_timeout).await {
-            if let Some(parsed) = parse_torrent_bytes(&bytes) {
-                info_hash = Some(parsed.info_hash);
-                announce_list = parsed.announce_list;
-                size = size.filter(|s| *s > 0).or(Some(parsed.total_size));
-                torrent_file = torrent_file_for_storage(torrent_type, Some(parsed.raw_bytes));
+            if let Some(tp) = parse_torrent_bytes(&bytes) {
+                info_hash = Some(tp.info_hash);
+                announce_list = tp.announce_list;
+                size = size.filter(|s| *s > 0).or(Some(tp.total_size));
+                torrent_file = torrent_file_for_storage(torrent_type, Some(tp.raw_bytes));
+                if !tp.files.is_empty() {
+                    parsed_torrent_files = Some(tp.files);
+                }
             }
         } else {
             let page_info =
@@ -615,12 +632,15 @@ async fn process_result(
             if torrent_file.is_none()
                 && let Some(dl) = page_info.download_url.as_deref()
                 && let Some(bytes) = download_torrent_bytes(client, dl, query_timeout).await
-                && let Some(parsed) = parse_torrent_bytes(&bytes)
+                && let Some(tp) = parse_torrent_bytes(&bytes)
             {
-                info_hash = Some(parsed.info_hash);
-                announce_list = parsed.announce_list;
-                size = size.filter(|s| *s > 0).or(Some(parsed.total_size));
-                torrent_file = torrent_file_for_storage(torrent_type, Some(parsed.raw_bytes));
+                info_hash = Some(tp.info_hash);
+                announce_list = tp.announce_list;
+                size = size.filter(|s| *s > 0).or(Some(tp.total_size));
+                torrent_file = torrent_file_for_storage(torrent_type, Some(tp.raw_bytes));
+                if !tp.files.is_empty() {
+                    parsed_torrent_files = Some(tp.files);
+                }
             }
         }
     }
@@ -636,9 +656,14 @@ async fn process_result(
 
     let info_hash = info_hash?;
 
-    let parsed = parser::parse_title(&title);
     let files = if media_type == "series" {
-        build_series_files(&parsed, season, episode)
+        if let Some(tf) = parsed_torrent_files
+            && !tf.is_empty()
+        {
+            build_series_files_from_torrent(&tf, &title, season.unwrap_or(1))
+        } else {
+            build_series_files(&parsed, season, episode, episode_count)
+        }
     } else {
         vec![]
     };
@@ -729,6 +754,7 @@ pub(crate) async fn process_feed_results(
                     media_type,
                     None,
                     None,
+                    None,
                     query_timeout,
                 )
                 .await?;
@@ -745,6 +771,7 @@ pub fn build_series_files(
     parsed: &crate::parser::ParsedTitle,
     season: Option<i32>,
     episode: Option<i32>,
+    episode_count: Option<i32>,
 ) -> Vec<StreamFile> {
     let seasons = if parsed.seasons.is_empty() {
         match season {
@@ -756,9 +783,15 @@ pub fn build_series_files(
     };
 
     let episodes = if parsed.episodes.is_empty() {
-        match episode {
-            Some(e) => vec![e],
-            None => vec![1],
+        if episode_count.is_some() {
+            // Season pack with known episode count: create one stub with episode_number=1
+            // and episode_end=n so the file_media_link row covers the full range.
+            vec![1]
+        } else {
+            match episode {
+                Some(e) => vec![e],
+                None => vec![1],
+            }
         }
     } else {
         parsed.episodes.clone()
@@ -768,14 +801,153 @@ pub fn build_series_files(
     let mut idx: i32 = 0;
     for s in &seasons {
         for e in &episodes {
+            let episode_end = if parsed.episodes.is_empty() && episode_count.is_some() {
+                episode_count
+            } else {
+                None
+            };
             files.push(StreamFile {
                 file_index: idx,
                 filename: String::new(),
                 season_number: *s,
                 episode_number: *e,
+                episode_end,
             });
             idx += 1;
         }
     }
     files
+}
+
+pub fn build_series_files_from_torrent(
+    files: &[crate::scrapers::torrent_metadata::TorrentFile],
+    torrent_name: &str,
+    default_season: i32,
+) -> Vec<StreamFile> {
+    let _ = torrent_name;
+    let mut result = Vec::new();
+    for f in files {
+        let parsed = crate::parser::parse_title(&f.path);
+        let (season, episode) = if !parsed.seasons.is_empty() && !parsed.episodes.is_empty() {
+            (parsed.seasons[0], parsed.episodes[0])
+        } else if let Some(detected) =
+            crate::parser::episode_detector::detect_episode(&f.path, default_season)
+        {
+            (detected.season, detected.episode)
+        } else {
+            continue;
+        };
+        result.push(StreamFile {
+            file_index: f.index,
+            filename: f.path.clone(),
+            season_number: season,
+            episode_number: episode,
+            episode_end: None,
+        });
+    }
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scrapers::torrent_metadata::TorrentFile;
+
+    // ── Seam 3: build_series_files_from_torrent ─────────────────────────────
+
+    #[test]
+    fn maps_episode_marked_filenames() {
+        let files: Vec<TorrentFile> = (1..=12)
+            .map(|e| TorrentFile {
+                index: e - 1,
+                path: format!("BoJack.S01E{e:02}.mkv"),
+                size: 1000,
+            })
+            .collect();
+        let result = build_series_files_from_torrent(&files, "BoJack.S01.BDRip.1080p", 1);
+        assert_eq!(result.len(), 12);
+        for sf in &result {
+            assert_eq!(sf.season_number, 1);
+            assert!(!sf.filename.is_empty());
+            assert!((1..=12).contains(&sf.episode_number));
+        }
+    }
+
+    #[test]
+    fn skips_non_episode_files() {
+        let files = vec![
+            TorrentFile { index: 0, path: "BoJack.S01E01.mkv".into(), size: 1000 },
+            TorrentFile { index: 1, path: "cover.jpg".into(), size: 500 },
+        ];
+        let result = build_series_files_from_torrent(&files, "Torrent", 1);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].episode_number, 1);
+    }
+
+    #[test]
+    fn uses_filename_not_torrent_name() {
+        let files = vec![
+            TorrentFile { index: 0, path: "BoJack.S01E05.mkv".into(), size: 1000 },
+        ];
+        let torrent_name = "Коняка БоДжек / Кінь БоДжек (S1) / BoJack Horseman (S1) (2014) BDRip 1080p Ukr/Eng | Sub Eng";
+        let result = build_series_files_from_torrent(&files, torrent_name, 1);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].filename, "BoJack.S01E05.mkv");
+        assert!(!result[0].filename.contains("Коняка"));
+    }
+
+    #[test]
+    fn skips_unmappable_filename() {
+        let files = vec![
+            TorrentFile { index: 0, path: "Bonus Feature.mkv".into(), size: 1000 },
+        ];
+        let result = build_series_files_from_torrent(&files, "Torrent", 1);
+        assert!(result.is_empty());
+    }
+
+    // ── Seam 5: build_series_files ──────────────────────────────────────────
+
+    #[test]
+    fn fallback_with_episode_count_uses_episode_1() {
+        let parsed = crate::parser::parse_title("Show.S01.BDRip");
+        let result = build_series_files(&parsed, Some(1), Some(5), Some(12));
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].episode_number, 1);
+        assert_eq!(result[0].episode_end, Some(12));
+    }
+
+    #[test]
+    fn fallback_without_episode_count_uses_requested_episode() {
+        let parsed = crate::parser::parse_title("Show.S01.BDRip");
+        let result = build_series_files(&parsed, Some(1), Some(5), None);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].episode_number, 5);
+        assert_eq!(result[0].episode_end, None);
+    }
+
+    #[test]
+    fn real_files_have_null_episode_end() {
+        let files = vec![
+            TorrentFile { index: 0, path: "S01E05.mkv".into(), size: 1 },
+        ];
+        let result = build_series_files_from_torrent(&files, "Torrent", 1);
+        assert_eq!(result[0].episode_end, None);
+    }
+
+    #[test]
+    fn single_episode_title_uses_parsed_episode() {
+        let parsed = crate::parser::parse_title("Show.S01E03.1080p");
+        let result = build_series_files(&parsed, Some(1), Some(5), None);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].episode_number, 3);
+    }
+
+    #[test]
+    fn multi_episode_title_uses_all_parsed() {
+        let parsed = crate::parser::parse_title("Show.S01E01E02.1080p");
+        let result = build_series_files(&parsed, Some(1), Some(5), None);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].episode_number, 1);
+        assert_eq!(result[1].episode_number, 2);
+    }
 }

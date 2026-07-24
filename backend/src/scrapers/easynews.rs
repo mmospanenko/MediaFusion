@@ -330,7 +330,7 @@ fn parse_item(
     }
 
     let files = if media_type == "series" {
-        build_series_files(&parsed, season, episode)
+        build_series_files(&parsed, season, episode, None)
     } else {
         vec![]
     };

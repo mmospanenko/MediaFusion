@@ -235,7 +235,7 @@ impl JobHandler for EztvRssCrawl {
             let is_series = !parsed.seasons.is_empty() || !parsed.episodes.is_empty();
             let media_type = if is_series { "series" } else { "movie" };
             let files = if is_series {
-                build_series_files(&parsed, None, None)
+                build_series_files(&parsed, None, None, None)
             } else {
                 vec![]
             };
@@ -273,6 +273,7 @@ impl JobHandler for EztvRssCrawl {
                     std::slice::from_ref(&stream),
                     &meta,
                     media_type,
+                    None,
                     None,
                     None,
                 )

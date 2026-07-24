@@ -136,6 +136,7 @@ impl JobHandler for JackettFeedScraper {
                     media_type,
                     None,
                     None,
+                    None,
                 )
                 .await;
             } else {

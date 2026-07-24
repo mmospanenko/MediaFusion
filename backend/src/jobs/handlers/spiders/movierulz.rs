@@ -282,7 +282,7 @@ async fn scrape_movierulz(args: &serde_json::Value, ctx: &JobCtx) -> Result<(), 
             title: media.title.clone(),
             year: media.year,
         };
-        stream_convert::write_back_torrents(pool, &block_streams, &meta, "movie", None, None).await;
+        stream_convert::write_back_torrents(pool, &block_streams, &meta, "movie", None, None, None).await;
         total_streams += block_streams.len();
     }
 

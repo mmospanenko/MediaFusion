@@ -14,7 +14,7 @@ use crate::{
         torrent_info,
         torrent_metadata::{
             self, download_torrent_bytes, jackett_torrent_type, parse_torrent_bytes,
-            resolve_download_url, should_persist_torrent_file, torrent_file_for_storage,
+            resolve_download_url, torrent_file_for_storage,
         },
     },
 };
@@ -109,6 +109,7 @@ pub async fn scrape_indexer(
     media_type: &str,
     season: Option<i32>,
     episode: Option<i32>,
+    episode_count: Option<i32>,
     max_process: usize,
     query_timeout: Duration,
     title_queries: &[String],
@@ -197,7 +198,7 @@ pub async fn scrape_indexer(
     let items: Vec<JackettResult> = all_results.into_iter().take(max_process).collect();
     use futures::stream::{self, StreamExt};
     stream::iter(items)
-        .map(|r| process_result(client, r, media_type, season, episode, query_timeout))
+        .map(|r| process_result(client, r, media_type, season, episode, episode_count, query_timeout))
         .buffer_unordered(RESULT_PROCESS_CONCURRENCY)
         .filter_map(|result| async move { result })
         .collect()
@@ -238,6 +239,7 @@ pub async fn scrape(
             media_type,
             season,
             episode,
+            None,
             max_process,
             query_timeout,
             title_queries,
@@ -436,6 +438,7 @@ async fn process_result(
     media_type: &str,
     season: Option<i32>,
     episode: Option<i32>,
+    episode_count: Option<i32>,
     query_timeout: Duration,
 ) -> Option<ScrapedStream> {
     let title = item.title.as_deref()?.trim().to_string();
@@ -459,19 +462,30 @@ async fn process_result(
     let mut announce_list: Vec<String> = Vec::new();
     let mut torrent_file: Option<Vec<u8>> = None;
     let mut size = item.size;
+    let parsed = parser::parse_title(&title);
+    let mut parsed_torrent_files: Option<Vec<crate::scrapers::torrent_metadata::TorrentFile>> = None;
 
-    let needs_download = should_persist_torrent_file(torrent_type) || info_hash.is_none();
+    let needs_download = torrent_metadata::needs_torrent_download(
+        torrent_type,
+        media_type,
+        &parsed,
+        season,
+        info_hash.as_deref(),
+    );
 
     if needs_download && let Some(url) = download_pick.as_deref() {
         if url.starts_with("magnet:") {
             info_hash = info_hash.or_else(|| parser::extract_info_hash(url));
             announce_list = torrent_metadata::announce_list_from_magnet(url);
         } else if let Some(bytes) = download_torrent_bytes(client, url, query_timeout).await {
-            if let Some(parsed) = parse_torrent_bytes(&bytes) {
-                info_hash = Some(parsed.info_hash);
-                announce_list = parsed.announce_list;
-                size = size.filter(|s| *s > 0).or(Some(parsed.total_size));
-                torrent_file = torrent_file_for_storage(torrent_type, Some(parsed.raw_bytes));
+            if let Some(tp) = parse_torrent_bytes(&bytes) {
+                info_hash = Some(tp.info_hash);
+                announce_list = tp.announce_list;
+                size = size.filter(|s| *s > 0).or(Some(tp.total_size));
+                torrent_file = torrent_file_for_storage(torrent_type, Some(tp.raw_bytes));
+                if !tp.files.is_empty() {
+                    parsed_torrent_files = Some(tp.files);
+                }
             }
         } else {
             let indexer_name = item.tracker.as_deref().unwrap_or("Jackett");
@@ -492,12 +506,15 @@ async fn process_result(
             if torrent_file.is_none()
                 && let Some(dl) = page_info.download_url.as_deref()
                 && let Some(bytes) = download_torrent_bytes(client, dl, query_timeout).await
-                && let Some(parsed) = parse_torrent_bytes(&bytes)
+                && let Some(tp) = parse_torrent_bytes(&bytes)
             {
-                info_hash = Some(parsed.info_hash);
-                announce_list = parsed.announce_list;
-                size = size.filter(|s| *s > 0).or(Some(parsed.total_size));
-                torrent_file = torrent_file_for_storage(torrent_type, Some(parsed.raw_bytes));
+                info_hash = Some(tp.info_hash);
+                announce_list = tp.announce_list;
+                size = size.filter(|s| *s > 0).or(Some(tp.total_size));
+                torrent_file = torrent_file_for_storage(torrent_type, Some(tp.raw_bytes));
+                if !tp.files.is_empty() {
+                    parsed_torrent_files = Some(tp.files);
+                }
             }
         }
     }
@@ -513,9 +530,14 @@ async fn process_result(
 
     let info_hash = info_hash?;
     let source = item.tracker.unwrap_or_else(|| "Jackett".to_string());
-    let parsed = parser::parse_title(&title);
     let files = if media_type == "series" {
-        build_series_files(&parsed, season, episode)
+        if let Some(tf) = parsed_torrent_files
+            && !tf.is_empty()
+        {
+            crate::scrapers::prowlarr::build_series_files_from_torrent(&tf, &title, season.unwrap_or(1))
+        } else {
+            build_series_files(&parsed, season, episode, episode_count)
+        }
     } else {
         vec![]
     };
@@ -573,7 +595,7 @@ pub(crate) async fn process_feed_results(
             let media_type = media_type_from_category_desc(item.category_desc.as_deref());
             async move {
                 let stream =
-                    process_result(client, item, media_type, None, None, query_timeout).await?;
+                    process_result(client, item, media_type, None, None, None, query_timeout).await?;
                 Some((stream, media_type))
             }
         })

@@ -244,7 +244,21 @@ async fn run_torrent_scrape(
     // DB and re-run scrapers, turning every "warm" request into a slow one.
     // The lock TTL (300s) serves as the cooldown window; the cache is refreshed
     // naturally when the next cold-path request repopulates it.
-    let opts = stream_convert::scraper_store_opts(meta.media_id, media_type, season, episode);
+    let episode_count = if media_type == "series" {
+        if let Some(s) = season {
+            crate::db::metadata_store::fetch_season_episode_count(
+                &state.pool,
+                meta.media_id,
+                s,
+            )
+            .await
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let opts = stream_convert::scraper_store_opts(meta.media_id, media_type, season, episode, episode_count);
     let normalized: Vec<_> = deduped
         .iter()
         .map(crate::db::TorrentStoreInput::from)
@@ -278,7 +292,7 @@ async fn run_torrent_scrape(
         .await;
 
         let tg_opts =
-            stream_convert::scraper_store_opts(meta.media_id, media_type, season, episode);
+            stream_convert::scraper_store_opts(meta.media_id, media_type, season, episode, None);
         let tg_validated: Vec<_> = tg_results
             .into_iter()
             .filter(|s| validate_telegram_stream(s, meta, media_type, &state.config))
@@ -341,7 +355,7 @@ pub async fn run_forced(
         .filter(|s| seen.insert(s.info_hash.clone()))
         .collect();
 
-    let opts = stream_convert::scraper_store_opts(meta.media_id, media_type, season, episode);
+    let opts = stream_convert::scraper_store_opts(meta.media_id, media_type, season, episode, None);
     let normalized: Vec<_> = deduped
         .iter()
         .map(crate::db::TorrentStoreInput::from)
@@ -375,7 +389,7 @@ pub async fn run_forced(
         )
         .await;
         let tg_opts =
-            stream_convert::scraper_store_opts(meta.media_id, media_type, season, episode);
+            stream_convert::scraper_store_opts(meta.media_id, media_type, season, episode, None);
         let tg_validated: Vec<_> = tg_results
             .into_iter()
             .filter(|s| validate_telegram_stream(s, meta, media_type, &state.config))
@@ -569,7 +583,7 @@ pub async fn run_usenet(
         .filter(|s| seen.insert(s.nzb_guid.clone()))
         .collect();
 
-    let opts = stream_convert::scraper_store_opts(meta.media_id, media_type, season, episode);
+    let opts = stream_convert::scraper_store_opts(meta.media_id, media_type, season, episode, None);
     let normalized: Vec<_> = validated
         .iter()
         .map(crate::db::UsenetStoreInput::from)
@@ -612,7 +626,7 @@ pub async fn run_background(
         .filter(|s| seen.insert(s.info_hash.clone()))
         .collect();
 
-    let opts = stream_convert::scraper_store_opts(meta.media_id, media_type, season, episode);
+    let opts = stream_convert::scraper_store_opts(meta.media_id, media_type, season, episode, None);
     let normalized: Vec<_> = deduped
         .iter()
         .map(crate::db::TorrentStoreInput::from)
@@ -785,6 +799,22 @@ async fn fan_out_with_opts(
     };
     let title_queries = Arc::new(title_queries);
 
+    // Fetch episode_count for series season packs (magnet-only fallback).
+    let episode_count = if media_type == "series" {
+        if let Some(s) = season {
+            crate::db::metadata_store::fetch_season_episode_count(
+                &state.pool,
+                meta.media_id,
+                s,
+            )
+            .await
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     let (prowlarr_max_process, prowlarr_max_time, prowlarr_query_timeout) =
         if let Some((max_process, max_time)) = opts.max_process_override {
             (
@@ -884,6 +914,7 @@ async fn fan_out_with_opts(
                         &mt,
                         season,
                         episode,
+                        episode_count,
                         prowlarr_max_process,
                         prowlarr_query_timeout,
                         title_queries.as_slice(),
@@ -929,6 +960,7 @@ async fn fan_out_with_opts(
                         &mt,
                         season,
                         episode,
+                        episode_count,
                         jackett_max_process,
                         jackett_query_timeout,
                         title_queries.as_slice(),

@@ -428,7 +428,7 @@ fn finalize_item(
     let size = item.attr_size.or(item.enclosure_length).unwrap_or(0);
     let parsed = parser::parse_title(&title);
     let files = if media_type == "series" {
-        build_series_files(&parsed, season, episode)
+        build_series_files(&parsed, season, episode, None)
     } else {
         vec![]
     };

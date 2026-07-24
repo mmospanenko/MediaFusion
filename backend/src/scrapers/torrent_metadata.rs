@@ -10,6 +10,14 @@ use crate::db::TorrentType;
 /// Maximum `.torrent` blob size stored in Postgres (2 MiB).
 pub const MAX_TORRENT_FILE_BYTES: usize = 2 * 1024 * 1024;
 
+/// A single file entry from a `.torrent` file list.
+#[derive(Debug, Clone)]
+pub struct TorrentFile {
+    pub index: i32,
+    pub path: String,
+    pub size: i64,
+}
+
 /// Parsed metadata from a `.torrent` file.
 #[derive(Debug, Clone)]
 pub struct ParsedTorrent {
@@ -18,6 +26,7 @@ pub struct ParsedTorrent {
     pub total_size: i64,
     pub announce_list: Vec<String>,
     pub raw_bytes: Vec<u8>,
+    pub files: Vec<TorrentFile>,
 }
 
 /// Providers allowed to surface non-public torrent streams in the catalog.
@@ -70,6 +79,26 @@ pub fn is_private_torrent_type(t: TorrentType) -> bool {
 /// Whether raw `.torrent` bytes should be persisted for this type.
 pub fn should_persist_torrent_file(t: TorrentType) -> bool {
     is_private_torrent_type(t)
+}
+
+/// Whether a torrent download is needed for this result.
+/// Returns true when:
+/// - The tracker type requires persisting the `.torrent` file (private/semi-private)
+/// - No info_hash is available (need to extract from the `.torrent`)
+/// - It's a series season pack (episodes empty, seasons non-empty) on a public tracker
+pub fn needs_torrent_download(
+    torrent_type: TorrentType,
+    media_type: &str,
+    parsed: &crate::parser::ParsedTitle,
+    season: Option<i32>,
+    info_hash: Option<&str>,
+) -> bool {
+    should_persist_torrent_file(torrent_type)
+        || info_hash.is_none()
+        || (media_type == "series"
+            && parsed.episodes.is_empty()
+            && !parsed.seasons.is_empty()
+            && season.is_some())
 }
 
 pub fn torrent_file_for_storage(
@@ -160,6 +189,58 @@ pub async fn download_torrent_bytes(
     }
 }
 
+const VIDEO_EXTENSIONS: &[&str] = &[
+    "mkv", "mp4", "avi", "webm", "mov", "m4v", "ts", "wmv", "flv",
+    "vob", "ogv", "ogg", "mts", "m2ts", "iso",
+];
+
+pub fn is_video_name(path: &str) -> bool {
+    let lower = path.to_lowercase();
+    let ext = std::path::Path::new(&lower)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    VIDEO_EXTENSIONS.contains(&ext)
+}
+
+pub fn files_from_torrent(torrent: &Torrent) -> Vec<TorrentFile> {
+    match &torrent.files {
+        Some(files) => files
+            .iter()
+            .enumerate()
+            .filter_map(|(i, f)| {
+                let path = f.path.to_string_lossy().into_owned();
+                if is_video_name(&path) {
+                    Some(TorrentFile {
+                        index: i as i32,
+                        path,
+                        size: f.length,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect(),
+        None => {
+            let path = torrent.name.clone();
+            if is_video_name(&path) {
+                vec![TorrentFile {
+                    index: 0,
+                    path,
+                    size: torrent.length,
+                }]
+            } else {
+                vec![]
+            }
+        }
+    }
+}
+
+pub fn extract_file_list(bytes: &[u8]) -> Option<Vec<TorrentFile>> {
+    let torrent = Torrent::read_from_bytes(bytes).ok()?;
+    Some(files_from_torrent(&torrent))
+}
+
 pub fn parse_torrent_bytes(bytes: &[u8]) -> Option<ParsedTorrent> {
     if !is_probable_torrent_bytes(bytes) {
         return None;
@@ -186,12 +267,15 @@ pub fn parse_torrent_bytes(bytes: &[u8]) -> Option<ParsedTorrent> {
         }
     }
 
+    let files = files_from_torrent(&torrent);
+
     Some(ParsedTorrent {
         info_hash: info_hash.to_lowercase(),
         name: torrent.name.clone(),
         total_size: torrent.length,
         announce_list,
         raw_bytes: bytes.to_vec(),
+        files,
     })
 }
 
@@ -224,6 +308,113 @@ pub fn torrent_type_from_json_value(t: &serde_json::Value) -> TorrentType {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn load_fixture(name: &str) -> Vec<u8> {
+        let path = format!("tests/fixtures/{name}");
+        std::fs::read(&path).expect("fixture not found")
+    }
+
+    // ── Seam 1: extract_file_list (adapter over lava_torrent) ──────────────
+
+    #[test]
+    fn extracts_video_files_from_multi_file_torrent() {
+        let bytes = load_fixture("bojack_s01_bdrip_1080p.torrent");
+        let files = extract_file_list(&bytes).expect("should parse");
+        assert_eq!(files.len(), 12);
+        for f in &files {
+            assert!(is_video_name(&f.path), "file {} is not video: {}", f.index, f.path);
+        }
+        assert!(!files.iter().any(|f| f.path.contains("cover.jpg")));
+    }
+
+    #[test]
+    fn extracts_video_files_from_single_file_torrent() {
+        let bytes = load_fixture("bojack_s01e1_5_webrip_720p.torrent");
+        let files = extract_file_list(&bytes).expect("should parse");
+        assert_eq!(files.len(), 5);
+        for f in &files {
+            assert!(is_video_name(&f.path));
+        }
+    }
+
+    #[test]
+    fn returns_none_for_invalid_bytes() {
+        assert!(extract_file_list(b"").is_none());
+        assert!(extract_file_list(b"not bencode").is_none());
+    }
+
+    // ── Seam 2: is_video_name (pure predicate) ──────────────────────────────
+
+    #[test]
+    fn detects_video_extensions() {
+        assert!(is_video_name("test.mkv"));
+        assert!(is_video_name("test.MP4"));
+        assert!(is_video_name("test.AVI"));
+    }
+
+    #[test]
+    fn rejects_non_video_extensions() {
+        assert!(!is_video_name("cover.jpg"));
+        assert!(!is_video_name("subtitles.srt"));
+        assert!(!is_video_name("readme.txt"));
+    }
+
+    // ── Seam 4: needs_torrent_download (pure boolean logic) ────────────────
+
+    #[test]
+    fn true_for_public_series_season_pack() {
+        let parsed = crate::parser::parse_title("Show.S01.BDRip");
+        assert!(needs_torrent_download(
+            TorrentType::Public, "series", &parsed, Some(1),
+            Some("ad47e255cf017864ec2f5fee57bef18c4b309808"),
+        ));
+    }
+
+    #[test]
+    fn false_for_public_single_episode() {
+        let parsed = crate::parser::parse_title("Show.S01E05.1080p");
+        assert!(!needs_torrent_download(
+            TorrentType::Public, "series", &parsed, Some(1),
+            Some("ad47e255cf017864ec2f5fee57bef18c4b309808"),
+        ));
+    }
+
+    #[test]
+    fn true_for_private_any_media() {
+        let parsed = crate::parser::parse_title("Show.S01E05.1080p");
+        assert!(needs_torrent_download(
+            TorrentType::Private, "series", &parsed, Some(1),
+            Some("ad47e255cf017864ec2f5fee57bef18c4b309808"),
+        ));
+    }
+
+    #[test]
+    fn true_when_info_hash_missing() {
+        let parsed = crate::parser::parse_title("Show.S01E05.1080p");
+        assert!(needs_torrent_download(
+            TorrentType::Public, "series", &parsed, Some(1), None,
+        ));
+    }
+
+    #[test]
+    fn false_for_movie_season_pack() {
+        let parsed = crate::parser::parse_title("Show.S01.BDRip");
+        assert!(!needs_torrent_download(
+            TorrentType::Public, "movie", &parsed, Some(1),
+            Some("ad47e255cf017864ec2f5fee57bef18c4b309808"),
+        ));
+    }
+
+    #[test]
+    fn false_for_series_with_episodes() {
+        let parsed = crate::parser::parse_title("Show.S01E05.1080p");
+        assert!(!needs_torrent_download(
+            TorrentType::Public, "series", &parsed, Some(1),
+            Some("ad47e255cf017864ec2f5fee57bef18c4b309808"),
+        ));
+    }
+
+    // ── Existing tests (pure functions, no changes) ─────────────────────────
 
     #[test]
     fn resolve_download_url_prefers_download_for_private() {

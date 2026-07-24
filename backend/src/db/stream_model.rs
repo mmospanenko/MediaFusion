@@ -106,6 +106,7 @@ pub struct StreamFileStoreInput {
     pub size: Option<i64>,
     pub season_number: i32,
     pub episode_number: i32,
+    pub episode_end: Option<i32>,
 }
 
 #[derive(Debug, Clone)]

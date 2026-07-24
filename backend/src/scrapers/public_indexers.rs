@@ -315,7 +315,7 @@ async fn scrape_rss(
                 continue;
             }
             let files = if media_type == "series" {
-                build_series_files(&parsed, season, episode)
+                build_series_files(&parsed, season, episode, None)
             } else {
                 vec![]
             };
@@ -423,7 +423,7 @@ async fn scrape_subsplease(
                 .and_then(|v| v.as_str())
                 .and_then(parse_size_bytes);
             let parsed = parser::parse_title(&name);
-            let files = build_series_files(&parsed, season, episode);
+            let files = build_series_files(&parsed, season, episode, None);
             if files.is_empty() {
                 continue;
             }
@@ -645,7 +645,7 @@ async fn process_row_data(
         .and_then(|s| s.trim().parse::<i32>().ok());
 
     let files = if media_type == "series" {
-        build_series_files(&parsed, season, episode)
+        build_series_files(&parsed, season, episode, None)
     } else {
         vec![]
     };

@@ -878,6 +878,7 @@ pub(crate) async fn scrape_ext_catalog(
                             filename: episode_title,
                             season_number: season,
                             episode_number: episode,
+                            episode_end: None,
                         }];
                         (series_title, None, "series", files)
                     } else if let Some(ref info) = wwe_info {
@@ -887,6 +888,7 @@ pub(crate) async fn scrape_ext_catalog(
                             filename: episode_title,
                             season_number: info.season_number,
                             episode_number: info.episode_number,
+                            episode_end: None,
                         }];
                         (info.series_title.clone(), None, "series", files)
                     } else if let Some(ref racing) = racing_info {
@@ -1009,6 +1011,7 @@ pub(crate) async fn scrape_ext_catalog(
                     &[stream],
                     &meta,
                     effective_media_type,
+                    None,
                     None,
                     None,
                 )

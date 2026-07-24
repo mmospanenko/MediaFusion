@@ -173,6 +173,7 @@ async fn store_torrent_series_with_files_links_episodes() {
             size: Some(1000),
             season_number: 1,
             episode_number: 1,
+            episode_end: None,
         },
         StreamFileStoreInput {
             file_index: 1,
@@ -180,6 +181,7 @@ async fn store_torrent_series_with_files_links_episodes() {
             size: Some(1000),
             season_number: 1,
             episode_number: 2,
+            episode_end: None,
         },
     ];
 
@@ -215,6 +217,7 @@ async fn store_torrent_series_files_default_episode_when_missing() {
         size: None,
         season_number: 0,
         episode_number: 0,
+        episode_end: None,
     }];
 
     let opts = StoreStreamOpts::scraper(MediaId(media_id), MediaType::Series);
@@ -319,6 +322,7 @@ async fn import_file_helpers_link_series_episode() {
         size: Some(512),
         season_number: 0,
         episode_number: 0,
+        episode_end: None,
     };
     let file_id = upsert_stream_file_row(pool, stream_id, &file_row)
         .await
@@ -566,5 +570,149 @@ async fn upsert_torrent_files_by_hash_enriches_existing_torrent() {
             .await
             .expect("count");
     assert_eq!(file_count, 1);
+    cleanup.finish().await;
+}
+
+// ─── episode_end range matching ──────────────────────────────────────────────
+
+async fn file_episode_range_exists(
+    pool: &sqlx::PgPool,
+    stream_id: i32,
+    media_id: i32,
+    season: i32,
+    episode: i32,
+) -> bool {
+    let count: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*) FROM file_media_link fml
+           JOIN stream_file sf ON sf.id = fml.file_id
+           WHERE sf.stream_id = $1 AND fml.media_id = $2
+             AND fml.season_number = $3
+             AND (fml.episode_number = $4 OR
+                  (fml.episode_end IS NOT NULL AND fml.episode_number <= $4 AND fml.episode_end >= $4))"#,
+    )
+    .bind(stream_id)
+    .bind(media_id)
+    .bind(season)
+    .bind(episode)
+    .fetch_one(pool)
+    .await
+    .unwrap_or(0);
+    count > 0
+}
+
+#[tokio::test]
+async fn episode_end_range_matches_requested_episode() {
+    let _db = common::lock_db_tests().await;
+    let pool = common::test_pool().await;
+    let mut cleanup = Cleanup::new(pool);
+    let media_id = insert_media(
+        pool,
+        MediaType::Series,
+        "stream_store::episode_end_range",
+    )
+    .await;
+    cleanup.media_ids.push(media_id);
+
+    let info_hash = format!("epr{media_id:0>36}");
+    let mut stream = sample_torrent(&info_hash);
+    stream.files = vec![StreamFileStoreInput {
+        file_index: 0,
+        filename: String::new(),
+        size: Some(1000),
+        season_number: 1,
+        episode_number: 1,
+        episode_end: Some(12),
+    }];
+
+    let opts = StoreStreamOpts::scraper(MediaId(media_id), MediaType::Series)
+        .with_episode(Some(1), Some(1), Some(12));
+    let result = store_torrent_stream(pool, &stream, &opts)
+        .await
+        .expect("store");
+    cleanup.stream_ids.push(result.stream_id().0);
+
+    assert!(
+        file_episode_range_exists(pool, result.stream_id().0, media_id, 1, 5).await,
+        "episode_end=12 must match requested episode 5"
+    );
+    cleanup.finish().await;
+}
+
+#[tokio::test]
+async fn episode_end_null_matches_only_exact_episode() {
+    let _db = common::lock_db_tests().await;
+    let pool = common::test_pool().await;
+    let mut cleanup = Cleanup::new(pool);
+    let media_id = insert_media(
+        pool,
+        MediaType::Series,
+        "stream_store::episode_end_null",
+    )
+    .await;
+    cleanup.media_ids.push(media_id);
+
+    let info_hash = format!("epn{media_id:0>36}");
+    let mut stream = sample_torrent(&info_hash);
+    stream.files = vec![StreamFileStoreInput {
+        file_index: 0,
+        filename: "Show.S01E01.mkv".to_string(),
+        size: Some(1000),
+        season_number: 1,
+        episode_number: 1,
+        episode_end: None,
+    }];
+
+    let opts = StoreStreamOpts::scraper(MediaId(media_id), MediaType::Series);
+    let result = store_torrent_stream(pool, &stream, &opts)
+        .await
+        .expect("store");
+    cleanup.stream_ids.push(result.stream_id().0);
+
+    assert!(
+        file_episode_range_exists(pool, result.stream_id().0, media_id, 1, 1).await,
+        "exact episode match must work"
+    );
+    assert!(
+        !file_episode_range_exists(pool, result.stream_id().0, media_id, 1, 5).await,
+        "episode_end=NULL must not match episode 5 when episode_number=1"
+    );
+    cleanup.finish().await;
+}
+
+#[tokio::test]
+async fn episode_end_outside_range_does_not_match() {
+    let _db = common::lock_db_tests().await;
+    let pool = common::test_pool().await;
+    let mut cleanup = Cleanup::new(pool);
+    let media_id = insert_media(
+        pool,
+        MediaType::Series,
+        "stream_store::episode_end_outside",
+    )
+    .await;
+    cleanup.media_ids.push(media_id);
+
+    let info_hash = format!("epo{media_id:0>36}");
+    let mut stream = sample_torrent(&info_hash);
+    stream.files = vec![StreamFileStoreInput {
+        file_index: 0,
+        filename: String::new(),
+        size: Some(1000),
+        season_number: 1,
+        episode_number: 1,
+        episode_end: Some(12),
+    }];
+
+    let opts = StoreStreamOpts::scraper(MediaId(media_id), MediaType::Series)
+        .with_episode(Some(1), Some(1), Some(12));
+    let result = store_torrent_stream(pool, &stream, &opts)
+        .await
+        .expect("store");
+    cleanup.stream_ids.push(result.stream_id().0);
+
+    assert!(
+        !file_episode_range_exists(pool, result.stream_id().0, media_id, 1, 15).await,
+        "episode_end=12 must not match requested episode 15"
+    );
     cleanup.finish().await;
 }

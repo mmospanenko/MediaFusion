@@ -593,6 +593,7 @@ pub async fn upsert_torrent_files_by_hash(
             size: Some(f.size),
             season_number: f.season.unwrap_or(0),
             episode_number: f.episode.unwrap_or(0),
+            episode_end: None,
         };
         if let Some(file_id) =
             insert_stream_file(&mut *txn, stream_id, &normalized, f.size > 0).await?
@@ -798,7 +799,7 @@ async fn link_files_or_media(
                         opts.media_id,
                         season,
                         episode,
-                        opts.episode_end,
+                        f.episode_end.or(opts.episode_end),
                         opts.is_primary,
                         opts.link_source,
                     )
@@ -962,6 +963,7 @@ async fn link_synthetic_episode_file(
         size: None,
         season_number: season,
         episode_number: episode,
+        episode_end: opts.episode_end,
     };
     if let Some(file_id) = insert_stream_file(pool, stream_id, &file, false).await? {
         insert_file_media_link(
