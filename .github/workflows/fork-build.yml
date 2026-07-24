@@ -1,0 +1,146 @@
+name: Fork Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch or ref to build
+        required: true
+        default: latest
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust-build:
+    name: Build (${{ matrix.label }})
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            label: linux-amd64
+            arch: amd64
+            rust_target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            label: linux-arm64
+            arch: arm64
+            rust_target: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref_name }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "10"
+
+      - name: Build frontend
+        run: cd clients/frontend && pnpm install --frozen-lockfile && pnpm run build
+
+      - name: Build API server
+        env:
+          SQLX_OFFLINE: "true"
+        run: |
+          cd backend
+          cargo build --release --no-default-features --features tls-native,jemalloc,embed-frontend \
+            --target ${{ matrix.rust_target }} \
+            --bin mediafusion-api
+
+      - name: Build worker
+        env:
+          SQLX_OFFLINE: "true"
+        run: |
+          cd backend
+          cargo build --release --no-default-features --features tls-native,jemalloc,nsfw-classifier \
+            --target ${{ matrix.rust_target }} \
+            --bin mediafusion-worker
+
+      - name: Stage artifacts
+        run: |
+          TARGET=${{ matrix.rust_target }}
+          ARCH=${{ matrix.arch }}
+          mkdir -p dist
+          cp "backend/target/$TARGET/release/mediafusion-api"    "dist/mediafusion-api-linux-$ARCH"
+          cp "backend/target/$TARGET/release/mediafusion-worker" "dist/mediafusion-worker-linux-$ARCH"
+          chmod +x dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-dist-${{ matrix.label }}
+          path: dist/
+          retention-days: 1
+
+  docker-build:
+    needs: rust-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref_name }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rust-dist-*
+          path: rust-dist/
+          merge-multiple: true
+
+      - name: Prepare artifacts
+        run: |
+          mkdir -p rust-dist/amd64 rust-dist/arm64
+          mv rust-dist/mediafusion-api-linux-amd64    rust-dist/amd64/mediafusion-api
+          mv rust-dist/mediafusion-worker-linux-amd64 rust-dist/amd64/mediafusion-worker
+          mv rust-dist/mediafusion-api-linux-arm64    rust-dist/arm64/mediafusion-api
+          mv rust-dist/mediafusion-worker-linux-arm64 rust-dist/arm64/mediafusion-worker
+          chmod +x rust-dist/amd64/* rust-dist/arm64/*
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Lowercase repository name
+        id: repo_name
+        run: echo "REPO=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Image tag
+        id: tag
+        run: |
+          REF="${{ inputs.ref || github.ref_name }}"
+          TAG=${REF//\//-}
+          echo "IMAGE_TAG=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        env:
+          BUILDKIT_PROGRESS: plain
+        with:
+          context: .
+          file: ./deployment/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          cache-from: type=gha,scope=mediafusion
+          cache-to: type=gha,mode=max,scope=mediafusion
+          tags: ghcr.io/${{ steps.repo_name.outputs.REPO }}:${{ steps.tag.outputs.IMAGE_TAG }}
