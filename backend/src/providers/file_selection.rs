@@ -37,6 +37,11 @@ fn video_files(files: &[FileEntry]) -> Vec<&FileEntry> {
         .collect()
 }
 
+fn re_any_number() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"\b(\d{1,3})\b").unwrap())
+}
+
 fn parse_season_episode(
     filename: &str,
     torrent_name: &str,
@@ -44,9 +49,6 @@ fn parse_season_episode(
 ) -> Option<(i32, i32)> {
     let base = basename(filename);
 
-    // Numbered-prefix racing filenames must win over PTT / generic detectors —
-    // otherwise `01.Formula.2…` can be misread and episode 1 playback falls
-    // through to the first file in the torrent.
     if parse_racing_title(torrent_name).is_some()
         && let Some((episode, _)) = racing_file_episode(base)
     {
@@ -78,12 +80,16 @@ fn parse_season_episode(
         return Some((ep.season, ep.episode));
     }
 
-    // Race-weekend torrents label sessions by name (FP1/Qualifying/Race) rather
-    // than SxxExx. Only apply when the release title is a confirmed racing
-    // event — the keyword matcher is substring-based and would misfire on
-    // ordinary titles otherwise.
     if parse_racing_title(torrent_name).is_some() {
         return racing_file_episode(base).map(|(episode, _)| (default_season, episode));
+    }
+
+    // Fallback: extract any number from filename as episode
+    if let Some(cap) = re_any_number().captures(base) {
+        let n: i32 = cap[1].parse().ok()?;
+        if (1..=999).contains(&n) {
+            return Some((default_season, n));
+        }
     }
 
     None
