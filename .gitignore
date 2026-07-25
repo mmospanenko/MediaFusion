@@ -143,8 +143,11 @@ kodi/build/
 kodi/*.zip
 .vscode/
 *.sql
+.agent/
+.opencode/
 .cursor/
 .claude/
+openspec/
 *.tar
 *.nzb
 # qa/ — local-only test harness (load, parity, e2e, seed scripts); never committed

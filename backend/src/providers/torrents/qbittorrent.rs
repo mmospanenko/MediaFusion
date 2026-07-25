@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use reqwest::Client;
 use serde_json::Value;
+use tracing::{debug, info, warn};
 
 use crate::providers::{
     ProviderError,
@@ -110,17 +111,32 @@ async fn qb_login(http: &Client, cfg: &QbConfig) -> Result<(), ProviderError> {
     let status = resp.status();
     let text = resp.text().await.unwrap_or_default();
     if status == reqwest::StatusCode::FORBIDDEN || text.to_lowercase().contains("fail") {
+        let body_preview: String = text.chars().take(200).collect();
+        warn!(
+            url = %cfg.qb_url,
+            status = %status,
+            body_preview = %body_preview,
+            "qb login failed"
+        );
         return Err(ProviderError::api(
             "Invalid qBittorrent credentials",
             "invalid_credentials.mp4",
         ));
     }
     if !status.is_success() {
+        let body_preview: String = text.chars().take(200).collect();
+        warn!(
+            url = %cfg.qb_url,
+            status = %status,
+            body_preview = %body_preview,
+            "qb login failed"
+        );
         return Err(ProviderError::api(
             format!("qBittorrent login failed (HTTP {status})"),
             "qbittorrent_error.mp4",
         ));
     }
+    debug!(url = %cfg.qb_url, status = %status, "qb login ok");
     Ok(())
 }
 
@@ -131,9 +147,11 @@ async fn qb_torrent_info(
 ) -> Result<Option<f64>, ProviderError> {
     let url = format!("{}/api/v2/torrents/info?hashes={info_hash}", cfg.qb_url);
     let arr: Vec<Value> = http.get(&url).send().await?.json().await?;
-    Ok(arr
+    let progress = arr
         .first()
-        .and_then(|t| t.get("progress").and_then(|v| v.as_f64())))
+        .and_then(|t| t.get("progress").and_then(|v| v.as_f64()));
+    debug!(hash = %info_hash, progress = ?progress, "qb torrent info");
+    Ok(progress)
 }
 
 async fn qb_add_torrent(
@@ -184,10 +202,32 @@ async fn qb_add_torrent(
     };
 
     let status = resp.status();
-    let text = resp.text().await.unwrap_or_default().to_lowercase();
-    if status.is_success() || is_duplicate_torrent_error(&text) {
+    let text = resp.text().await.unwrap_or_default();
+    let text_lower = text.to_lowercase();
+    let duplicate = is_duplicate_torrent_error(&text_lower);
+    let source = if torrent_file.is_some() {
+        "file"
+    } else {
+        "magnet"
+    };
+
+    if status.is_success() || duplicate {
+        info!(
+            hash = %info_hash,
+            source = %source,
+            is_private = %is_private,
+            duplicate = %duplicate,
+            "qb add torrent"
+        );
         return Ok(());
     }
+    let body_preview: String = text.chars().take(200).collect();
+    warn!(
+        hash = %info_hash,
+        status = %status,
+        body_preview = %body_preview,
+        "qb add torrent failed"
+    );
     Err(ProviderError::api(
         format!("Failed to add torrent to qBittorrent: {text}"),
         "add_torrent_failed.mp4",
@@ -248,14 +288,28 @@ async fn wait_for_progress(
     info_hash: &str,
 ) -> Result<(), ProviderError> {
     let threshold = cfg.play_video_after as f64 / 100.0;
-    for _ in 0..20 {
-        if let Some(progress) = qb_torrent_info(http, cfg, info_hash).await?
-            && progress >= threshold
-        {
+    for attempt in 1..=20 {
+        let progress = qb_torrent_info(http, cfg, info_hash).await?.unwrap_or(0.0);
+        debug!(
+            hash = %info_hash,
+            attempt = %attempt,
+            progress = %progress,
+            threshold = %threshold,
+            "qb wait poll"
+        );
+        if progress >= threshold {
             return Ok(());
         }
         tokio::time::sleep(Duration::from_secs(5)).await;
     }
+    let last_progress = qb_torrent_info(http, cfg, info_hash).await?.unwrap_or(0.0);
+    warn!(
+        hash = %info_hash,
+        attempts = 20,
+        last_progress = %last_progress,
+        threshold = %threshold,
+        "qb wait timed out"
+    );
     Err(ProviderError::api(
         "Torrent not downloaded yet",
         "torrent_not_downloaded.mp4",
@@ -284,11 +338,15 @@ async fn list_webdav_files_recursive(
         )
         .await
         .map_err(|_| {
-            ProviderError::api(
-                "WebDAV listing timed out",
-                "webdav_timeout.mp4",
-            )
+            warn!(root = %root, "webdav list timed out");
+            ProviderError::api("WebDAV listing timed out", "webdav_timeout.mp4")
         })??;
+
+        debug!(
+            root = %root,
+            href_count = %hrefs.len(),
+            "webdav list"
+        );
 
         for href in hrefs {
             let name = href.rsplit('/').next().unwrap_or(&href).to_string();
@@ -320,16 +378,30 @@ async fn find_file(
     season: Option<i32>,
     episode: Option<i32>,
 ) -> Result<String, ProviderError> {
+    let mut roots_tried = 0usize;
     for root in &cfg.downloads_paths {
         let path = format!("{}/{}", root.trim_end_matches('/'), info_hash);
         let files = list_webdav_files_recursive(http, cfg, &path).await?;
+        roots_tried += 1;
         if files.is_empty() {
             continue;
         }
         let idx =
             select_torrent_file_index(&files, torrent_name, filename, season, episode, None, None)?;
+        debug!(
+            hash = %info_hash,
+            roots_tried = %roots_tried,
+            candidates = %files.len(),
+            selected_idx = %idx,
+            "qb find file"
+        );
         return Ok(files[idx].name.clone());
     }
+    warn!(
+        hash = %info_hash,
+        candidates = 0,
+        "qb find file: no match"
+    );
     Err(ProviderError::api(
         "No matching file available for this torrent",
         "no_matching_file.mp4",
@@ -364,9 +436,43 @@ pub async fn get_video_url(
     is_private: bool,
 ) -> Result<String, ProviderError> {
     let cfg = parse_config(config)?;
-    qb_login(http, &cfg).await?;
+    qb_login(http, &cfg).await.map_err(|e| {
+        warn!(
+            step = "login",
+            hash = %info_hash,
+            error = %e,
+            video_file = "invalid_credentials.mp4",
+            "playback step failed"
+        );
+        e
+    })?;
+    info!(
+        step = "login",
+        provider = "qbittorrent",
+        hash = %info_hash,
+        "playback step"
+    );
 
-    if qb_torrent_info(http, &cfg, info_hash).await?.is_none() {
+    if qb_torrent_info(http, &cfg, info_hash)
+        .await
+        .map_err(|e| {
+            warn!(
+                step = "info",
+                hash = %info_hash,
+                error = %e,
+                video_file = "qbittorrent_error.mp4",
+                "playback step failed"
+            );
+            e
+        })?
+        .is_none()
+    {
+        info!(
+            step = "info",
+            provider = "qbittorrent",
+            hash = %info_hash,
+            "playback step"
+        );
         qb_add_torrent(
             http,
             &cfg,
@@ -376,13 +482,81 @@ pub async fn get_video_url(
             torrent_file,
             is_private,
         )
-        .await?;
-    } else if qb_torrent_info(http, &cfg, info_hash)
-        .await?
-        .map(|p| p * 100.0 < cfg.play_video_after as f64)
-        .unwrap_or(true)
-    {
-        wait_for_progress(http, &cfg, info_hash).await?;
+        .await
+        .map_err(|e| {
+            warn!(
+                step = "add",
+                hash = %info_hash,
+                error = %e,
+                video_file = "add_torrent_failed.mp4",
+                "playback step failed"
+            );
+            e
+        })?;
+        info!(
+            step = "add",
+            provider = "qbittorrent",
+            hash = %info_hash,
+            "playback step"
+        );
+        wait_for_progress(http, &cfg, info_hash)
+            .await
+            .map_err(|e| {
+                warn!(
+                    step = "wait",
+                    hash = %info_hash,
+                    error = %e,
+                    video_file = "torrent_not_downloaded.mp4",
+                    "playback step failed"
+                );
+                e
+            })?;
+        info!(
+            step = "wait",
+            provider = "qbittorrent",
+            hash = %info_hash,
+            "playback step"
+        );
+    } else {
+        let progress = qb_torrent_info(http, &cfg, info_hash)
+            .await
+            .unwrap_or(None)
+            .unwrap_or(0.0);
+        if progress * 100.0 < cfg.play_video_after as f64 {
+            info!(
+                step = "info",
+                provider = "qbittorrent",
+                hash = %info_hash,
+                skipped_add = true,
+                "playback step"
+            );
+            wait_for_progress(http, &cfg, info_hash)
+                .await
+                .map_err(|e| {
+                    warn!(
+                        step = "wait",
+                        hash = %info_hash,
+                        error = %e,
+                        video_file = "torrent_not_downloaded.mp4",
+                        "playback step failed"
+                    );
+                    e
+                })?;
+            info!(
+                step = "wait",
+                provider = "qbittorrent",
+                hash = %info_hash,
+                "playback step"
+            );
+        } else {
+            info!(
+                step = "info",
+                provider = "qbittorrent",
+                hash = %info_hash,
+                skipped_add = true,
+                "playback step"
+            );
+        }
     }
 
     let file_path = match find_file(
@@ -396,11 +570,60 @@ pub async fn get_video_url(
     )
     .await
     {
-        Ok(p) => p,
+        Ok(p) => {
+            info!(
+                step = "find",
+                provider = "qbittorrent",
+                hash = %info_hash,
+                "playback step"
+            );
+            p
+        }
         Err(_) => {
-            qb_add_magnet(http, &cfg, magnet_link, info_hash).await?;
-            wait_for_progress(http, &cfg, info_hash).await?;
-            find_file(
+            warn!(
+                step = "find",
+                hash = %info_hash,
+                error = "no_matching_file.mp4",
+                video_file = "no_matching_file.mp4",
+                "playback step failed"
+            );
+            qb_add_magnet(http, &cfg, magnet_link, info_hash)
+                .await
+                .map_err(|e| {
+                    warn!(
+                        step = "add",
+                        hash = %info_hash,
+                        error = %e,
+                        video_file = "add_torrent_failed.mp4",
+                        "playback step failed"
+                    );
+                    e
+                })?;
+            info!(
+                step = "add",
+                provider = "qbittorrent",
+                hash = %info_hash,
+                "playback step"
+            );
+            wait_for_progress(http, &cfg, info_hash)
+                .await
+                .map_err(|e| {
+                    warn!(
+                        step = "wait",
+                        hash = %info_hash,
+                        error = %e,
+                        video_file = "torrent_not_downloaded.mp4",
+                        "playback step failed"
+                    );
+                    e
+                })?;
+            info!(
+                step = "wait",
+                provider = "qbittorrent",
+                hash = %info_hash,
+                "playback step"
+            );
+            let p = find_file(
                 http,
                 &cfg,
                 info_hash,
@@ -409,16 +632,40 @@ pub async fn get_video_url(
                 season,
                 episode,
             )
-            .await?
+            .await
+            .map_err(|e| {
+                warn!(
+                    step = "find",
+                    hash = %info_hash,
+                    error = %e,
+                    video_file = "no_matching_file.mp4",
+                    "playback step failed"
+                );
+                e
+            })?;
+            info!(
+                step = "find",
+                provider = "qbittorrent",
+                hash = %info_hash,
+                "playback step"
+            );
+            p
         }
     };
 
-    Ok(webdav::url_with_creds(
+    let url = webdav::url_with_creds(
         &cfg.webdav_url,
         &file_path,
         &cfg.webdav_user,
         &cfg.webdav_pass,
-    ))
+    );
+    info!(
+        step = "resolve",
+        provider = "qbittorrent",
+        hash = %info_hash,
+        "playback step"
+    );
+    Ok(url)
 }
 
 /// List info_hashes present as WebDAV download folders.

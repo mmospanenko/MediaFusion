@@ -66,43 +66,64 @@ pub fn detect_episode(filename: &str, default_season: i32) -> Option<DetectedEpi
     if let Some(cap) = re_sxxexx().captures(base) {
         let s: i32 = cap[1].parse().ok()?;
         let e: i32 = cap[2].parse().ok()?;
-        return Some(DetectedEpisode { season: s, episode: e });
+        return Some(DetectedEpisode {
+            season: s,
+            episode: e,
+        });
     }
 
     if let Some(cap) = re_1x04().captures(base) {
         let s: i32 = cap[1].parse().ok()?;
         let e: i32 = cap[2].parse().ok()?;
-        return Some(DetectedEpisode { season: s, episode: e });
+        return Some(DetectedEpisode {
+            season: s,
+            episode: e,
+        });
     }
 
     if let Some(cap) = re_season_episode_text().captures(base) {
         let s: i32 = cap[1].parse().ok()?;
         let e: i32 = cap[2].parse().ok()?;
-        return Some(DetectedEpisode { season: s, episode: e });
+        return Some(DetectedEpisode {
+            season: s,
+            episode: e,
+        });
     }
 
     if let Some(cap) = re_bracketed().captures(base) {
         let s: i32 = cap[1].parse().ok()?;
         let e: i32 = cap[2].parse().ok()?;
-        return Some(DetectedEpisode { season: s, episode: e });
+        return Some(DetectedEpisode {
+            season: s,
+            episode: e,
+        });
     }
 
     if let Some(cap) = re_period_sep().captures(base) {
         let s: i32 = cap[1].parse().ok()?;
         let e: i32 = cap[2].parse().ok()?;
         if s <= 30 && e <= 50 {
-            return Some(DetectedEpisode { season: s, episode: e });
+            return Some(DetectedEpisode {
+                season: s,
+                episode: e,
+            });
         }
     }
 
     if let Some(cap) = re_episode_only_dash().captures(base) {
         let e: i32 = cap[1].parse().ok()?;
-        return Some(DetectedEpisode { season: default_season, episode: e });
+        return Some(DetectedEpisode {
+            season: default_season,
+            episode: e,
+        });
     }
 
     if let Some(cap) = re_ep_word().captures(base) {
         let e: i32 = cap[1].parse().ok()?;
-        return Some(DetectedEpisode { season: default_season, episode: e });
+        return Some(DetectedEpisode {
+            season: default_season,
+            episode: e,
+        });
     }
 
     if let Some(cap) = re_absolute().captures(base) {
@@ -114,7 +135,10 @@ pub fn detect_episode(filename: &str, default_season: i32) -> Option<DetectedEpi
         if !hex_ctx {
             let e: i32 = cap[1].parse().ok()?;
             if e > 0 && e <= 999 {
-                return Some(DetectedEpisode { season: default_season, episode: e });
+                return Some(DetectedEpisode {
+                    season: default_season,
+                    episode: e,
+                });
             }
         }
     }
@@ -125,7 +149,10 @@ pub fn detect_episode(filename: &str, default_season: i32) -> Option<DetectedEpi
         if (1..=50).contains(&e) {
             let full = m.as_str();
             if !(full.starts_with('.') && full.ends_with('.') && cap[1].len() == 1) {
-                return Some(DetectedEpisode { season: default_season, episode: e });
+                return Some(DetectedEpisode {
+                    season: default_season,
+                    episode: e,
+                });
             }
         }
     }
@@ -159,31 +186,61 @@ mod tests {
     #[test]
     fn test_sxxexx() {
         let r = detect_episode("Show.S02E05.mkv", 1).unwrap();
-        assert_eq!(r, DetectedEpisode { season: 2, episode: 5 });
+        assert_eq!(
+            r,
+            DetectedEpisode {
+                season: 2,
+                episode: 5
+            }
+        );
     }
 
     #[test]
     fn test_1x04() {
         let r = detect_episode("Show.2x08.720p.mkv", 1).unwrap();
-        assert_eq!(r, DetectedEpisode { season: 2, episode: 8 });
+        assert_eq!(
+            r,
+            DetectedEpisode {
+                season: 2,
+                episode: 8
+            }
+        );
     }
 
     #[test]
     fn test_text_form() {
         let r = detect_episode("Season 3 Episode 7.mp4", 1).unwrap();
-        assert_eq!(r, DetectedEpisode { season: 3, episode: 7 });
+        assert_eq!(
+            r,
+            DetectedEpisode {
+                season: 3,
+                episode: 7
+            }
+        );
     }
 
     #[test]
     fn test_bracketed() {
         let r = detect_episode("[S01E03] Title.mkv", 1).unwrap();
-        assert_eq!(r, DetectedEpisode { season: 1, episode: 3 });
+        assert_eq!(
+            r,
+            DetectedEpisode {
+                season: 1,
+                episode: 3
+            }
+        );
     }
 
     #[test]
     fn test_ep_word() {
         let r = detect_episode("ShowName.Ep.07.mkv", 1).unwrap();
-        assert_eq!(r, DetectedEpisode { season: 1, episode: 7 });
+        assert_eq!(
+            r,
+            DetectedEpisode {
+                season: 1,
+                episode: 7
+            }
+        );
     }
 
     #[test]
@@ -194,43 +251,85 @@ mod tests {
     #[test]
     fn test_bare_episode_underscore() {
         let r = detect_episode("[FanVoxUA]_Rick_and_Morty_02_[1080p].mkv", 1).unwrap();
-        assert_eq!(r, DetectedEpisode { season: 1, episode: 2 });
+        assert_eq!(
+            r,
+            DetectedEpisode {
+                season: 1,
+                episode: 2
+            }
+        );
     }
 
     #[test]
     fn test_bare_episode_dash() {
         let r = detect_episode("Show-02-720p.mkv", 1).unwrap();
-        assert_eq!(r, DetectedEpisode { season: 1, episode: 2 });
+        assert_eq!(
+            r,
+            DetectedEpisode {
+                season: 1,
+                episode: 2
+            }
+        );
     }
 
     #[test]
     fn test_bare_episode_dot() {
         let r = detect_episode("Show.02.720p.mkv", 1).unwrap();
-        assert_eq!(r, DetectedEpisode { season: 1, episode: 2 });
+        assert_eq!(
+            r,
+            DetectedEpisode {
+                season: 1,
+                episode: 2
+            }
+        );
     }
 
     #[test]
     fn test_bare_episode_space() {
         let r = detect_episode("Show 02 720p.mkv", 1).unwrap();
-        assert_eq!(r, DetectedEpisode { season: 1, episode: 2 });
+        assert_eq!(
+            r,
+            DetectedEpisode {
+                season: 1,
+                episode: 2
+            }
+        );
     }
 
     #[test]
     fn test_bare_episode_bracket() {
         let r = detect_episode("[02] Show.mkv", 1).unwrap();
-        assert_eq!(r, DetectedEpisode { season: 1, episode: 2 });
+        assert_eq!(
+            r,
+            DetectedEpisode {
+                season: 1,
+                episode: 2
+            }
+        );
     }
 
     #[test]
     fn test_bare_episode_dash_space() {
         let r = detect_episode("Show - 02.mkv", 1).unwrap();
-        assert_eq!(r, DetectedEpisode { season: 1, episode: 2 });
+        assert_eq!(
+            r,
+            DetectedEpisode {
+                season: 1,
+                episode: 2
+            }
+        );
     }
 
     #[test]
     fn test_bare_episode_single_digit() {
         let r = detect_episode("Show_1_1080p.mkv", 1).unwrap();
-        assert_eq!(r, DetectedEpisode { season: 1, episode: 1 });
+        assert_eq!(
+            r,
+            DetectedEpisode {
+                season: 1,
+                episode: 1
+            }
+        );
     }
 
     #[test]
@@ -245,7 +344,13 @@ mod tests {
 
     #[test]
     fn test_bare_episode_does_not_match_racing() {
-        assert!(detect_episode("01.Formula.2.2026.R07.British.Practice.SkyF1HD.1080P.mkv", 1).is_none());
+        assert!(
+            detect_episode(
+                "01.Formula.2.2026.R07.British.Practice.SkyF1HD.1080P.mkv",
+                1
+            )
+            .is_none()
+        );
     }
 
     #[test]

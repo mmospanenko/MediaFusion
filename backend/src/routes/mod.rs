@@ -821,7 +821,6 @@ pub fn router(state: Arc<AppState>) -> Router {
 
     let api_router = api_router
         // ── Middleware ───────────────────────────────────────────────────────
-        .layer(axum::middleware::from_fn(request_id_middleware))
         .layer(axum::middleware::from_fn_with_state(
             Arc::clone(&state),
             rate_limit_middleware,
@@ -848,6 +847,7 @@ pub fn router(state: Arc<AppState>) -> Router {
             stream_timeout,
         ))
         .layer(make_trace_layer!())
+        .layer(axum::middleware::from_fn(request_id_middleware))
         .layer(CorsLayer::permissive())
         .with_state(state.clone());
 

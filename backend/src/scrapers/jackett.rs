@@ -198,7 +198,17 @@ pub async fn scrape_indexer(
     let items: Vec<JackettResult> = all_results.into_iter().take(max_process).collect();
     use futures::stream::{self, StreamExt};
     stream::iter(items)
-        .map(|r| process_result(client, r, media_type, season, episode, episode_count, query_timeout))
+        .map(|r| {
+            process_result(
+                client,
+                r,
+                media_type,
+                season,
+                episode,
+                episode_count,
+                query_timeout,
+            )
+        })
         .buffer_unordered(RESULT_PROCESS_CONCURRENCY)
         .filter_map(|result| async move { result })
         .collect()
@@ -463,7 +473,8 @@ async fn process_result(
     let mut torrent_file: Option<Vec<u8>> = None;
     let mut size = item.size;
     let parsed = parser::parse_title(&title);
-    let mut parsed_torrent_files: Option<Vec<crate::scrapers::torrent_metadata::TorrentFile>> = None;
+    let mut parsed_torrent_files: Option<Vec<crate::scrapers::torrent_metadata::TorrentFile>> =
+        None;
 
     let needs_download = torrent_metadata::needs_torrent_download(
         torrent_type,
@@ -534,7 +545,11 @@ async fn process_result(
         if let Some(tf) = parsed_torrent_files
             && !tf.is_empty()
         {
-            crate::scrapers::prowlarr::build_series_files_from_torrent(&tf, &title, season.unwrap_or(1))
+            crate::scrapers::prowlarr::build_series_files_from_torrent(
+                &tf,
+                &title,
+                season.unwrap_or(1),
+            )
         } else {
             build_series_files(&parsed, season, episode, episode_count)
         }
@@ -595,7 +610,8 @@ pub(crate) async fn process_feed_results(
             let media_type = media_type_from_category_desc(item.category_desc.as_deref());
             async move {
                 let stream =
-                    process_result(client, item, media_type, None, None, None, query_timeout).await?;
+                    process_result(client, item, media_type, None, None, None, query_timeout)
+                        .await?;
                 Some((stream, media_type))
             }
         })

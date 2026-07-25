@@ -605,12 +605,7 @@ async fn episode_end_range_matches_requested_episode() {
     let _db = common::lock_db_tests().await;
     let pool = common::test_pool().await;
     let mut cleanup = Cleanup::new(pool);
-    let media_id = insert_media(
-        pool,
-        MediaType::Series,
-        "stream_store::episode_end_range",
-    )
-    .await;
+    let media_id = insert_media(pool, MediaType::Series, "stream_store::episode_end_range").await;
     cleanup.media_ids.push(media_id);
 
     let info_hash = format!("epr{media_id:0>36}");
@@ -624,8 +619,11 @@ async fn episode_end_range_matches_requested_episode() {
         episode_end: Some(12),
     }];
 
-    let opts = StoreStreamOpts::scraper(MediaId(media_id), MediaType::Series)
-        .with_episode(Some(1), Some(1), Some(12));
+    let opts = StoreStreamOpts::scraper(MediaId(media_id), MediaType::Series).with_episode(
+        Some(1),
+        Some(1),
+        Some(12),
+    );
     let result = store_torrent_stream(pool, &stream, &opts)
         .await
         .expect("store");
@@ -643,12 +641,7 @@ async fn episode_end_null_matches_only_exact_episode() {
     let _db = common::lock_db_tests().await;
     let pool = common::test_pool().await;
     let mut cleanup = Cleanup::new(pool);
-    let media_id = insert_media(
-        pool,
-        MediaType::Series,
-        "stream_store::episode_end_null",
-    )
-    .await;
+    let media_id = insert_media(pool, MediaType::Series, "stream_store::episode_end_null").await;
     cleanup.media_ids.push(media_id);
 
     let info_hash = format!("epn{media_id:0>36}");
@@ -684,12 +677,7 @@ async fn episode_end_outside_range_does_not_match() {
     let _db = common::lock_db_tests().await;
     let pool = common::test_pool().await;
     let mut cleanup = Cleanup::new(pool);
-    let media_id = insert_media(
-        pool,
-        MediaType::Series,
-        "stream_store::episode_end_outside",
-    )
-    .await;
+    let media_id = insert_media(pool, MediaType::Series, "stream_store::episode_end_outside").await;
     cleanup.media_ids.push(media_id);
 
     let info_hash = format!("epo{media_id:0>36}");
@@ -703,8 +691,11 @@ async fn episode_end_outside_range_does_not_match() {
         episode_end: Some(12),
     }];
 
-    let opts = StoreStreamOpts::scraper(MediaId(media_id), MediaType::Series)
-        .with_episode(Some(1), Some(1), Some(12));
+    let opts = StoreStreamOpts::scraper(MediaId(media_id), MediaType::Series).with_episode(
+        Some(1),
+        Some(1),
+        Some(12),
+    );
     let result = store_torrent_stream(pool, &stream, &opts)
         .await
         .expect("store");

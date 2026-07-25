@@ -190,8 +190,8 @@ pub async fn download_torrent_bytes(
 }
 
 const VIDEO_EXTENSIONS: &[&str] = &[
-    "mkv", "mp4", "avi", "webm", "mov", "m4v", "ts", "wmv", "flv",
-    "vob", "ogv", "ogg", "mts", "m2ts", "iso",
+    "mkv", "mp4", "avi", "webm", "mov", "m4v", "ts", "wmv", "flv", "vob", "ogv", "ogg", "mts",
+    "m2ts", "iso",
 ];
 
 pub fn is_video_name(path: &str) -> bool {
@@ -322,7 +322,12 @@ mod tests {
         let files = extract_file_list(&bytes).expect("should parse");
         assert_eq!(files.len(), 12);
         for f in &files {
-            assert!(is_video_name(&f.path), "file {} is not video: {}", f.index, f.path);
+            assert!(
+                is_video_name(&f.path),
+                "file {} is not video: {}",
+                f.index,
+                f.path
+            );
         }
         assert!(!files.iter().any(|f| f.path.contains("cover.jpg")));
     }
@@ -365,7 +370,10 @@ mod tests {
     fn true_for_public_series_season_pack() {
         let parsed = crate::parser::parse_title("Show.S01.BDRip");
         assert!(needs_torrent_download(
-            TorrentType::Public, "series", &parsed, Some(1),
+            TorrentType::Public,
+            "series",
+            &parsed,
+            Some(1),
             Some("ad47e255cf017864ec2f5fee57bef18c4b309808"),
         ));
     }
@@ -374,7 +382,10 @@ mod tests {
     fn false_for_public_single_episode() {
         let parsed = crate::parser::parse_title("Show.S01E05.1080p");
         assert!(!needs_torrent_download(
-            TorrentType::Public, "series", &parsed, Some(1),
+            TorrentType::Public,
+            "series",
+            &parsed,
+            Some(1),
             Some("ad47e255cf017864ec2f5fee57bef18c4b309808"),
         ));
     }
@@ -383,7 +394,10 @@ mod tests {
     fn true_for_private_any_media() {
         let parsed = crate::parser::parse_title("Show.S01E05.1080p");
         assert!(needs_torrent_download(
-            TorrentType::Private, "series", &parsed, Some(1),
+            TorrentType::Private,
+            "series",
+            &parsed,
+            Some(1),
             Some("ad47e255cf017864ec2f5fee57bef18c4b309808"),
         ));
     }
@@ -392,7 +406,11 @@ mod tests {
     fn true_when_info_hash_missing() {
         let parsed = crate::parser::parse_title("Show.S01E05.1080p");
         assert!(needs_torrent_download(
-            TorrentType::Public, "series", &parsed, Some(1), None,
+            TorrentType::Public,
+            "series",
+            &parsed,
+            Some(1),
+            None,
         ));
     }
 
@@ -400,7 +418,10 @@ mod tests {
     fn false_for_movie_season_pack() {
         let parsed = crate::parser::parse_title("Show.S01.BDRip");
         assert!(!needs_torrent_download(
-            TorrentType::Public, "movie", &parsed, Some(1),
+            TorrentType::Public,
+            "movie",
+            &parsed,
+            Some(1),
             Some("ad47e255cf017864ec2f5fee57bef18c4b309808"),
         ));
     }
@@ -409,7 +430,10 @@ mod tests {
     fn false_for_series_with_episodes() {
         let parsed = crate::parser::parse_title("Show.S01E05.1080p");
         assert!(!needs_torrent_download(
-            TorrentType::Public, "series", &parsed, Some(1),
+            TorrentType::Public,
+            "series",
+            &parsed,
+            Some(1),
             Some("ad47e255cf017864ec2f5fee57bef18c4b309808"),
         ));
     }

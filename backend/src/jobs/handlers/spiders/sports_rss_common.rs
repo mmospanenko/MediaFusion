@@ -203,8 +203,16 @@ pub async fn persist_sports_rss_stream(
         title: clean_title,
         year,
     };
-    stream_convert::write_back_torrents(pool, &[stream], &meta, effective_media_type, None, None, None)
-        .await;
+    stream_convert::write_back_torrents(
+        pool,
+        &[stream],
+        &meta,
+        effective_media_type,
+        None,
+        None,
+        None,
+    )
+    .await;
 
     if let Some(extra_files) = extra_files_to_persist {
         let entries: Vec<crate::db::streams::TorrentFileEntry> = extra_files

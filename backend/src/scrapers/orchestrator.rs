@@ -49,7 +49,12 @@ fn validate_stream_core(
     true
 }
 
-fn validate_scraped_stream(stream: &ScrapedStream, meta: &SearchMeta, media_type: &str, cfg: &AppConfig) -> bool {
+fn validate_scraped_stream(
+    stream: &ScrapedStream,
+    meta: &SearchMeta,
+    media_type: &str,
+    cfg: &AppConfig,
+) -> bool {
     validate_stream_core(
         &stream.parsed,
         &stream.files,
@@ -246,19 +251,21 @@ async fn run_torrent_scrape(
     // naturally when the next cold-path request repopulates it.
     let episode_count = if media_type == "series" {
         if let Some(s) = season {
-            crate::db::metadata_store::fetch_season_episode_count(
-                &state.pool,
-                meta.media_id,
-                s,
-            )
-            .await
+            crate::db::metadata_store::fetch_season_episode_count(&state.pool, meta.media_id, s)
+                .await
         } else {
             None
         }
     } else {
         None
     };
-    let opts = stream_convert::scraper_store_opts(meta.media_id, media_type, season, episode, episode_count);
+    let opts = stream_convert::scraper_store_opts(
+        meta.media_id,
+        media_type,
+        season,
+        episode,
+        episode_count,
+    );
     let normalized: Vec<_> = deduped
         .iter()
         .map(crate::db::TorrentStoreInput::from)
@@ -802,12 +809,8 @@ async fn fan_out_with_opts(
     // Fetch episode_count for series season packs (magnet-only fallback).
     let episode_count = if media_type == "series" {
         if let Some(s) = season {
-            crate::db::metadata_store::fetch_season_episode_count(
-                &state.pool,
-                meta.media_id,
-                s,
-            )
-            .await
+            crate::db::metadata_store::fetch_season_episode_count(&state.pool, meta.media_id, s)
+                .await
         } else {
             None
         }

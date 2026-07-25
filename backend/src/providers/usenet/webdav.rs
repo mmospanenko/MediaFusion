@@ -3,6 +3,7 @@
 /// Uses a PROPFIND Depth:1 request to list the download directory, then
 /// selects the best-matching video file by season/episode or size.
 use quick_xml::{Reader, events::Event};
+use tracing::{debug, warn};
 
 use crate::providers::ProviderError;
 
@@ -26,7 +27,7 @@ pub async fn list(
         )
     };
 
-    let xml = http
+    let resp = http
         .request(
             reqwest::Method::from_bytes(b"PROPFIND")
                 .map_err(|e| ProviderError::api(format!("PROPFIND method: {e}"), "webdav_error.mp4"))?,
@@ -39,11 +40,49 @@ pub async fn list(
             r#"<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>"#,
         )
         .send()
-        .await?
-        .text()
         .await?;
 
-    parse_hrefs(&xml)
+    let status = resp.status();
+    let body = resp.text().await?;
+
+    if !status.is_success() {
+        let host = extract_host(webdav_base);
+        warn!(host = %host, status = %status, "webdav list http error");
+        return Err(ProviderError::api(
+            format!("WebDAV PROPFIND returned HTTP {status}"),
+            "webdav_error.mp4",
+        ));
+    }
+
+    match parse_hrefs(&body) {
+        Ok(hrefs) => {
+            let host = extract_host(webdav_base);
+            debug!(
+                host = %host,
+                depth = 1,
+                status = %status,
+                count = %hrefs.len(),
+                "webdav list"
+            );
+            Ok(hrefs)
+        }
+        Err(e) => {
+            let host = extract_host(webdav_base);
+            warn!(host = %host, error = %e, "webdav list parse error");
+            Err(e)
+        }
+    }
+}
+
+fn extract_host(url: &str) -> String {
+    url.split('/')
+        .nth(2)
+        .unwrap_or(url)
+        .trim_start_matches("//")
+        .split('@')
+        .next_back()
+        .unwrap_or("")
+        .to_string()
 }
 
 fn parse_hrefs(xml: &str) -> Result<Vec<String>, ProviderError> {
@@ -129,6 +168,12 @@ pub fn url_with_creds(
     username: &str,
     password: &str,
 ) -> String {
+    let host = extract_host(webdav_base);
+    debug!(
+        host = %host,
+        path_len = %file_path.len(),
+        "webdav url_with_creds"
+    );
     let enc_u = urlencoding::encode(username);
     let enc_p = urlencoding::encode(password);
     let file = file_path.trim_start_matches('/');

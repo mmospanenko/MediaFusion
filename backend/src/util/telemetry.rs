@@ -62,10 +62,18 @@ macro_rules! make_trace_layer {
         tower_http::trace::TraceLayer::new_for_http()
             .make_span_with(|request: &axum::http::Request<axum::body::Body>| {
                 let safe_path = $crate::util::telemetry::sanitize_path(request.uri().path());
+                let req_id = request
+                    .headers()
+                    .get("x-request-id")
+                    .and_then(|v| v.to_str().ok())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
                 tracing::info_span!(
                     "http",
                     method = %request.method(),
                     path = %safe_path,
+                    request_id = %req_id,
                 )
             })
             .on_request(

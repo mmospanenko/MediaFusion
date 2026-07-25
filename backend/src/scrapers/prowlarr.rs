@@ -590,7 +590,8 @@ async fn process_result(
     let mut torrent_file: Option<Vec<u8>> = None;
     let mut size = item.size;
     let parsed = parser::parse_title(&title);
-    let mut parsed_torrent_files: Option<Vec<crate::scrapers::torrent_metadata::TorrentFile>> = None;
+    let mut parsed_torrent_files: Option<Vec<crate::scrapers::torrent_metadata::TorrentFile>> =
+        None;
 
     let needs_download = torrent_metadata::needs_torrent_download(
         torrent_type,
@@ -876,8 +877,16 @@ mod tests {
     #[test]
     fn skips_non_episode_files() {
         let files = vec![
-            TorrentFile { index: 0, path: "BoJack.S01E01.mkv".into(), size: 1000 },
-            TorrentFile { index: 1, path: "cover.jpg".into(), size: 500 },
+            TorrentFile {
+                index: 0,
+                path: "BoJack.S01E01.mkv".into(),
+                size: 1000,
+            },
+            TorrentFile {
+                index: 1,
+                path: "cover.jpg".into(),
+                size: 500,
+            },
         ];
         let result = build_series_files_from_torrent(&files, "Torrent", 1);
         assert_eq!(result.len(), 1);
@@ -886,9 +895,11 @@ mod tests {
 
     #[test]
     fn uses_filename_not_torrent_name() {
-        let files = vec![
-            TorrentFile { index: 0, path: "BoJack.S01E05.mkv".into(), size: 1000 },
-        ];
+        let files = vec![TorrentFile {
+            index: 0,
+            path: "BoJack.S01E05.mkv".into(),
+            size: 1000,
+        }];
         let torrent_name = "Коняка БоДжек / Кінь БоДжек (S1) / BoJack Horseman (S1) (2014) BDRip 1080p Ukr/Eng | Sub Eng";
         let result = build_series_files_from_torrent(&files, torrent_name, 1);
         assert_eq!(result.len(), 1);
@@ -898,9 +909,11 @@ mod tests {
 
     #[test]
     fn skips_unmappable_filename() {
-        let files = vec![
-            TorrentFile { index: 0, path: "Bonus Feature.mkv".into(), size: 1000 },
-        ];
+        let files = vec![TorrentFile {
+            index: 0,
+            path: "Bonus Feature.mkv".into(),
+            size: 1000,
+        }];
         let result = build_series_files_from_torrent(&files, "Torrent", 1);
         assert!(result.is_empty());
     }
@@ -927,9 +940,11 @@ mod tests {
 
     #[test]
     fn real_files_have_null_episode_end() {
-        let files = vec![
-            TorrentFile { index: 0, path: "S01E05.mkv".into(), size: 1 },
-        ];
+        let files = vec![TorrentFile {
+            index: 0,
+            path: "S01E05.mkv".into(),
+            size: 1,
+        }];
         let result = build_series_files_from_torrent(&files, "Torrent", 1);
         assert_eq!(result[0].episode_end, None);
     }
