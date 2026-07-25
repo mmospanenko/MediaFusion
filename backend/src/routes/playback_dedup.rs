@@ -15,7 +15,7 @@ use crate::providers::ProviderError;
 pub const CLIENT_WAIT_BUDGET_SECS: u64 = 105;
 
 /// Max time the lock holder may spend resolving a provider URL.
-pub const HOLDER_RESOLVE_TIMEOUT_SECS: u64 = 90;
+pub const HOLDER_RESOLVE_TIMEOUT_SECS: u64 = 30;
 
 /// Browser streamability probes use HEAD with ~5s client timeout — cap server HEAD work so
 /// the lock is released for the follow-up GET.

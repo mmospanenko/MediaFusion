@@ -69,7 +69,7 @@ fn parse_config(raw: &Value) -> Result<QbConfig, ProviderError> {
         .get("play_video_after")
         .or_else(|| raw.get("pva"))
         .and_then(|v| v.as_i64())
-        .unwrap_or(100) as i32;
+        .unwrap_or(3) as i32;
     let seeding_time_limit = raw
         .get("seeding_time_limit")
         .or_else(|| raw.get("stl"))
@@ -248,7 +248,7 @@ async fn wait_for_progress(
     info_hash: &str,
 ) -> Result<(), ProviderError> {
     let threshold = cfg.play_video_after as f64 / 100.0;
-    for _ in 0..60 {
+    for _ in 0..20 {
         if let Some(progress) = qb_torrent_info(http, cfg, info_hash).await?
             && progress >= threshold
         {
@@ -272,14 +272,23 @@ async fn list_webdav_files_recursive(
     let mut idx = 0usize;
 
     while let Some(dir) = stack.pop() {
-        let hrefs = webdav::list(
-            http,
-            &cfg.webdav_url,
-            dir.trim_start_matches('/'),
-            &cfg.webdav_user,
-            &cfg.webdav_pass,
+        let hrefs = tokio::time::timeout(
+            Duration::from_secs(5),
+            webdav::list(
+                http,
+                &cfg.webdav_url,
+                dir.trim_start_matches('/'),
+                &cfg.webdav_user,
+                &cfg.webdav_pass,
+            ),
         )
-        .await?;
+        .await
+        .map_err(|_| {
+            ProviderError::api(
+                "WebDAV listing timed out",
+                "webdav_timeout.mp4",
+            )
+        })??;
 
         for href in hrefs {
             let name = href.rsplit('/').next().unwrap_or(&href).to_string();
